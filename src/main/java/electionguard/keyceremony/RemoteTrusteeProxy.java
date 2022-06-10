@@ -7,9 +7,9 @@ import com.google.common.flogger.FluentLogger;
 import electionguard.core.ElementModP;
 import electionguard.core.GroupContext;
 import electionguard.core.SchnorrProof;
-import electionguard.protogen.CommonRpcProto;
-import electionguard.protogen.RemoteKeyCeremonyTrusteeProto;
-import electionguard.protogen.RemoteKeyCeremonyTrusteeServiceGrpc;
+import electionguard.protogen2.CommonRpcProto;
+import electionguard.protogen2.RemoteKeyCeremonyTrusteeProto;
+import electionguard.protogen2.RemoteKeyCeremonyTrusteeServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
@@ -17,19 +17,15 @@ import io.grpc.StatusRuntimeException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static electionguard.protoconvert.CommonConvertKt.importElementModP;
-import static electionguard.protoconvert.CommonConvertKt.importHashedCiphertext;
-import static electionguard.protoconvert.CommonConvertKt.importSchnorrProof;
-import static electionguard.protoconvert.CommonConvertKt.publishHashedCiphertext;
-import static electionguard.protoconvert.CommonConvertKt.publishSchnorrProof;
-import static electionguard.protogen.RemoteKeyCeremonyTrusteeServiceGrpc.RemoteKeyCeremonyTrusteeServiceBlockingStub;
+import static electionguard.protogen2.RemoteKeyCeremonyTrusteeServiceGrpc.RemoteKeyCeremonyTrusteeServiceBlockingStub;
+import static electionguard.util.ConvertCommonProto.*;
 import static electionguard.util.KUtils.productionGroup;
 
 /**
  * KeyCeremonyRemoteTrustee proxy, communicating over gRpc.
  * This lives in KeyCeremonyRemote, talking to a KeyCeremonyRemoteTrustee.
  */
-class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
+class RemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
   private static final int MAX_MESSAGE = 51 * 1000 * 1000; // 51 Mb
 
@@ -58,16 +54,21 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
   @Override
   public Result<PublicKeys, String> sendPublicKeys() {
     try {
-      logger.atInfo().log("%s sendPublicKeys", id());
+      logger.atInfo().log("%s proxy sendPublicKeys", id());
       RemoteKeyCeremonyTrusteeProto.PublicKeySetRequest request = RemoteKeyCeremonyTrusteeProto.PublicKeySetRequest.getDefaultInstance();
       RemoteKeyCeremonyTrusteeProto.PublicKeySet response = blockingStub.sendPublicKeys(request);
       if (!response.getError().isEmpty()) {
-        logger.atSevere().log("sendPublicKeys failed: %s", response.getError());
+        logger.atSevere().log("%s proxy sendPublicKeys failed: %s", id(), response.getError());
         return new Err(response.getError());
       }
+
+      logger.atInfo().log("%s proxy getCoefficientComittmentsCount %d", id(), response.getCoefficientComittmentsCount());
+
       List<ElementModP> commitments = response.getCoefficientComittmentsList().stream()
               .map(p -> importElementModP(group, p))
               .toList();
+      logger.atInfo().log("%s proxy commitments %d", id(), commitments.size());
+
       List<SchnorrProof> proofs = response.getCoefficientProofsList().stream()
               .map(p -> importSchnorrProof(group, p))
               .toList();
@@ -79,7 +80,7 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
               proofs));
 
     } catch (StatusRuntimeException e) {
-      logger.atSevere().withCause(e).log("sendPublicKeys failed: ");
+      logger.atSevere().withCause(e).log("%s proxy sendPublicKeys failed", id());
       return new Err(e.getMessage());
     }
   }
@@ -87,38 +88,45 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
   @Override
   public Result<PublicKeys, String> receivePublicKeys(PublicKeys keyset) {
     try {
-      logger.atInfo().log("%s receivePublicKeys from %s", id(), keyset.getGuardianId());
+      logger.atInfo().log("%s proxy receivePublicKeys from %s", id(), keyset.getGuardianId());
       RemoteKeyCeremonyTrusteeProto.PublicKeySet.Builder request = RemoteKeyCeremonyTrusteeProto.PublicKeySet.newBuilder();
       request.setOwnerId(keyset.getGuardianId())
               .setGuardianXCoordinate(keyset.getGuardianXCoordinate());
+      keyset.getCoefficientCommitments().forEach(c -> request.addCoefficientComittments(publishElementModP(c)));
       keyset.getCoefficientProofs().forEach(p -> request.addCoefficientProofs(publishSchnorrProof(p)));
 
       CommonRpcProto.ErrorResponse response = blockingStub.receivePublicKeys(request.build());
       if (!response.getError().isEmpty()) {
-        logger.atSevere().log("receivePublicKeys failed: '%s'", response.getError());
+        logger.atSevere().log("proxy receivePublicKeys failed: '%s'", response.getError());
+        return new Err(response.getError());
       }
-      return new Err(response.getError());
 
     } catch (StatusRuntimeException e) {
-      logger.atSevere().withCause(e).log("receivePublicKeys StatusRuntimeException: ");
-      return new Err("receivePublicKeys StatusRuntimeException: " + e.getMessage());
+      logger.atSevere().withCause(e).log("proxy receivePublicKeys StatusRuntimeException: ");
+      return new Err("proxy receivePublicKeys StatusRuntimeException: " + e.getMessage());
     }
+    return new Ok(keyset);
   }
 
   @Override
   public Result<SecretKeyShare, String> sendSecretKeyShare(String guardianId) {
     try {
       RemoteKeyCeremonyTrusteeProto.PartialKeyBackupRequest request = RemoteKeyCeremonyTrusteeProto.PartialKeyBackupRequest.newBuilder().setGuardianId(guardianId).build();
-      RemoteKeyCeremonyTrusteeProto.PartialKeyBackup backup = blockingStub.sendSecretKeyShare(request);
+      RemoteKeyCeremonyTrusteeProto.PartialKeyBackup response = blockingStub.sendSecretKeyShare(request);
+      if (!response.getError().isEmpty()) {
+        logger.atSevere().log("proxy sendSecretKeyShare failed: '%s'", response.getError());
+        return new Err(response.getError());
+      }
+
       return new Ok(new SecretKeyShare(
-              backup.getGeneratingGuardianId(),
-              backup.getDesignatedGuardianId(),
-              backup.getDesignatedGuardianXCoordinate(),
-              importHashedCiphertext(group, backup.getEncryptedCoordinate())));
+              response.getGeneratingGuardianId(),
+              response.getDesignatedGuardianId(),
+              response.getDesignatedGuardianXCoordinate(),
+              importHashedCiphertext(group, response.getEncryptedCoordinate())));
 
     } catch (StatusRuntimeException e) {
-      logger.atSevere().withCause(e).log("sendPartialKeyBackup failed: ");
-      return new Err("sendSecretKeyShare StatusRuntimeException: " + e.getMessage());
+      logger.atSevere().withCause(e).log("proxy sendPartialKeyBackup failed: ");
+      return new Err("proxy sendSecretKeyShare StatusRuntimeException: " + e.getMessage());
     }
   }
 
@@ -139,8 +147,8 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
       }
 
     } catch (StatusRuntimeException e) {
-      logger.atSevere().withCause(e).log("receiveSecretKeyShare failed: ");
-      return new Err("receiveSecretKeyShare StatusRuntimeException: " + e.getMessage());
+      logger.atSevere().withCause(e).log("proxy receiveSecretKeyShare failed: ");
+      return new Err("proxy receiveSecretKeyShare StatusRuntimeException: " + e.getMessage());
     }
   }
 
@@ -148,13 +156,13 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
     try {
       CommonRpcProto.ErrorResponse response = blockingStub.saveState(com.google.protobuf.Empty.getDefaultInstance());
       if (!response.getError().isEmpty()) {
-        logger.atSevere().log("saveState failed: %s", response.getError());
+        logger.atSevere().log("proxy saveState failed: %s", response.getError());
         return false;
       }
       return true;
 
     } catch (StatusRuntimeException e) {
-      logger.atSevere().withCause(e).log("saveState failed: ");
+      logger.atSevere().withCause(e).log("proxy saveState failed: ");
       e.printStackTrace();
       return false;
     }
@@ -203,7 +211,7 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
   }
 
   /** Construct client for accessing HelloWorld server using the existing channel. */
-  private KeyCeremonyRemoteTrusteeProxy(String trusteeId, int coordinate, int quorum, ManagedChannel channel) {
+  private RemoteTrusteeProxy(String trusteeId, int coordinate, int quorum, ManagedChannel channel) {
     this.trusteeId = trusteeId;
     this.coordinate = coordinate;
     this.quorum = quorum;
@@ -237,12 +245,12 @@ class KeyCeremonyRemoteTrusteeProxy implements KeyCeremonyTrusteeIF {
       return this;
     }
 
-    KeyCeremonyRemoteTrusteeProxy build() {
+    RemoteTrusteeProxy build() {
       ManagedChannel channel = ManagedChannelBuilder.forTarget(target)
               .usePlaintext()
               .enableFullStreamDecompression()
               .maxInboundMessageSize(MAX_MESSAGE).usePlaintext().build();
-      return new KeyCeremonyRemoteTrusteeProxy(trusteeId, coordinate, quorum, channel);
+      return new RemoteTrusteeProxy(trusteeId, coordinate, quorum, channel);
     }
   }
 }

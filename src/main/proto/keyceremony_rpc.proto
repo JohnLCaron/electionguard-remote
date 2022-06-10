@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option java_package = "electionguard.protogen";
+option java_package = "electionguard.protogen2";
 option java_outer_classname = "RemoteKeyCeremonyProto";
 
 service RemoteKeyCeremonyService {
@@ -17,5 +17,4 @@ message RegisterKeyCeremonyTrusteeResponse {
   uint32 guardian_x_coordinate = 2; // assign the KeyCeremonyTrustee's xcoordinate
   uint32 quorum = 3; // tell the KeyCeremonyTrustee what the quorum size is.
   string error = 4; // error if not empty
-  string constants = 5; // non-standard constants
 }

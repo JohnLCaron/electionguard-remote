@@ -42,6 +42,7 @@ dependencies {
     compileOnly(libs.tomcatAnnotationsApi)
     implementation(libs.protobufJava)
 
+    implementation(libs.bytesLib)
     implementation(libs.jcommander)
 
     implementation(libs.flogger)
@@ -118,7 +119,7 @@ tasks {
             // .onEach { println("add from dependencies: ${it.name}") }
             .map { if (it.isDirectory) it else zipTree(it) })
         val sourcesMain = sourceSets.main.get()
-        // exclude("/META-INF/PFOPENSO.*")
+        exclude("/META-INF/PFOPENSO.*")
         // sourcesMain.allSource.forEach { println("add from sources: ${it.name}") }
         from(sourcesMain.output)
     }
