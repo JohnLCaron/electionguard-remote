@@ -10,8 +10,8 @@ import electionguard.ballot.Manifest;
 import electionguard.core.GroupContext;
 import electionguard.input.ManifestInputValidation;
 import electionguard.input.ValidationMessages;
-import electionguard.protogen.RemoteKeyCeremonyProto;
-import electionguard.protogen.RemoteKeyCeremonyServiceGrpc;
+import electionguard.protogen2.RemoteKeyCeremonyProto;
+import electionguard.protogen2.RemoteKeyCeremonyServiceGrpc;
 import electionguard.publish.Consumer;
 import electionguard.publish.ElectionRecord;
 import electionguard.publish.Publisher;
@@ -161,7 +161,7 @@ public class RunRemoteKeyCeremony {
       System.err.println("*** server shut down");
     }));
 
-    System.out.printf("---- KeyCeremonyRemoteService started, listening on %d ----%n", port);
+    System.out.printf("---- RemoteKeyCeremony started, listening on %d ----%n", port);
   }
 
   private void stopit() throws InterruptedException {
@@ -176,7 +176,7 @@ public class RunRemoteKeyCeremony {
   final int nguardians;
   final int quorum;
   final Publisher publisher;
-  final List<KeyCeremonyRemoteTrusteeProxy> trusteeProxies = Collections.synchronizedList(new ArrayList<>());
+  final List<RemoteTrusteeProxy> trusteeProxies = Collections.synchronizedList(new ArrayList<>());
   boolean startedKeyCeremony = false;
 
   RunRemoteKeyCeremony(ElectionRecord electionRecord, String outputDir) throws IOException {
@@ -205,14 +205,14 @@ public class RunRemoteKeyCeremony {
     List<KeyCeremonyTrusteeIF> trusteeIfs = new ArrayList<>(trusteeProxies);
     Result<KeyCeremonyResults, String> keyCeremonyExchangeResult = keyCeremonyExchange(trusteeIfs);
     if (keyCeremonyExchangeResult.component2() != null) {
-      System.out.printf("%nKeyCeremonyExchange failed error = %s%n", keyCeremonyExchangeResult.component2());
+      System.out.printf("%nRemoteKeyCeremony failed error = %s%n", keyCeremonyExchangeResult.component2());
       return false;
     }
     KeyCeremonyResults results = keyCeremonyExchangeResult.component1();
 
     // tell the remote trustees to save their state
     boolean allOk = true;
-    for (KeyCeremonyRemoteTrusteeProxy trustee : trusteeProxies) {
+    for (RemoteTrusteeProxy trustee : trusteeProxies) {
       if (!trustee.saveState()) {
         allOk = false;
       }
@@ -227,6 +227,7 @@ public class RunRemoteKeyCeremony {
                       "CreatedFromDir", electionRecord.topdir())
       ));
     }
+    System.out.printf("%nRemoteKeyCeremony was success = %s%n", allOk);
 
     return allOk;
   }
@@ -234,7 +235,7 @@ public class RunRemoteKeyCeremony {
   private void shutdownRemoteTrustees(boolean allOk) {
     System.out.printf("Shutdown Remote Trustees%n");
     // tell the remote trustees to finish
-    for (KeyCeremonyRemoteTrusteeProxy trustee : trusteeProxies) {
+    for (RemoteTrusteeProxy trustee : trusteeProxies) {
       try {
         boolean ok = trustee.finish(allOk);
         System.out.printf(" KeyCeremonyRemoteTrusteeProxy %s shutdown was success = %s%n", trustee.id(), ok);
@@ -245,7 +246,7 @@ public class RunRemoteKeyCeremony {
 
     // close the proxy channels
     boolean shutdownOk = true;
-    for (KeyCeremonyRemoteTrusteeProxy trustee : trusteeProxies) {
+    for (RemoteTrusteeProxy trustee : trusteeProxies) {
       if (!trustee.shutdown()) {
         shutdownOk = false;
       }
@@ -254,8 +255,8 @@ public class RunRemoteKeyCeremony {
   }
 
   private final AtomicInteger nextCoordinate = new AtomicInteger(0);
-  synchronized KeyCeremonyRemoteTrusteeProxy registerTrustee(String guardianId, String url) {
-    for (KeyCeremonyRemoteTrusteeProxy proxy : trusteeProxies) {
+  synchronized RemoteTrusteeProxy registerTrustee(String guardianId, String url) {
+    for (RemoteTrusteeProxy proxy : trusteeProxies) {
       if (proxy.id().toLowerCase().contains(guardianId.toLowerCase()) ||
               guardianId.toLowerCase().contains(proxy.id().toLowerCase())) {
         throw new IllegalArgumentException(
@@ -263,13 +264,13 @@ public class RunRemoteKeyCeremony {
                 guardianId, proxy.id()));
       }
     }
-    KeyCeremonyRemoteTrusteeProxy.Builder builder = KeyCeremonyRemoteTrusteeProxy.builder();
+    RemoteTrusteeProxy.Builder builder = RemoteTrusteeProxy.builder();
     int coordinate = nextCoordinate.incrementAndGet();
     builder.setTrusteeId(guardianId);
     builder.setUrl(url);
     builder.setCoordinate(coordinate);
     builder.setQuorum(this.quorum);
-    KeyCeremonyRemoteTrusteeProxy trustee = builder.build();
+    RemoteTrusteeProxy trustee = builder.build();
     trusteeProxies.add(trustee);
     return trustee;
   }
@@ -280,7 +281,7 @@ public class RunRemoteKeyCeremony {
     public void registerTrustee(RemoteKeyCeremonyProto.RegisterKeyCeremonyTrusteeRequest request,
                                 StreamObserver<RemoteKeyCeremonyProto.RegisterKeyCeremonyTrusteeResponse> responseObserver) {
 
-      System.out.printf("KeyCeremonyRemote registerTrustee %s url %s %n", request.getGuardianId(), request.getRemoteUrl());
+      System.out.printf("%nRemoteKeyCeremony registerTrustee %s url %s", request.getGuardianId(), request.getRemoteUrl());
 
       if (startedKeyCeremony) {
         responseObserver.onNext(RemoteKeyCeremonyProto.RegisterKeyCeremonyTrusteeResponse.newBuilder()
@@ -292,16 +293,16 @@ public class RunRemoteKeyCeremony {
 
       RemoteKeyCeremonyProto.RegisterKeyCeremonyTrusteeResponse.Builder response = RemoteKeyCeremonyProto.RegisterKeyCeremonyTrusteeResponse.newBuilder();
       try {
-        KeyCeremonyRemoteTrusteeProxy trustee = RunRemoteKeyCeremony.this.registerTrustee(request.getGuardianId(), request.getRemoteUrl());
+        RemoteTrusteeProxy trustee = RunRemoteKeyCeremony.this.registerTrustee(request.getGuardianId(), request.getRemoteUrl());
         response.setGuardianId(trustee.id());
         response.setGuardianXCoordinate(trustee.xCoordinate());
         response.setQuorum(trustee.quorum());
         responseObserver.onNext(response.build());
         responseObserver.onCompleted();
-        logger.atInfo().log("KeyCeremonyRemote registerTrustee '%s'", trustee.id());
+        logger.atInfo().log("RemoteKeyCeremony registerTrustee '%s'", trustee.id());
 
       } catch (Throwable t) {
-        logger.atSevere().withCause(t).log("KeyCeremonyRemote registerTrustee failed");
+        logger.atSevere().withCause(t).log("RemoteKeyCeremony registerTrustee failed");
         response.setError(t.getMessage());
         responseObserver.onNext(response.build());
         responseObserver.onCompleted();

@@ -8,10 +8,10 @@ import com.google.common.flogger.FluentLogger;
 import electionguard.core.ElementModP;
 import electionguard.core.GroupContext;
 import electionguard.core.SchnorrProof;
-import electionguard.protogen.CommonRpcProto;
-import electionguard.protogen.RemoteKeyCeremonyProto;
-import electionguard.protogen.RemoteKeyCeremonyTrusteeProto;
-import electionguard.protogen.RemoteKeyCeremonyTrusteeServiceGrpc;
+import electionguard.protogen2.CommonRpcProto;
+import electionguard.protogen2.RemoteKeyCeremonyProto;
+import electionguard.protogen2.RemoteKeyCeremonyTrusteeProto;
+import electionguard.protogen2.RemoteKeyCeremonyTrusteeServiceGrpc;
 import electionguard.publish.Publisher;
 import electionguard.publish.PublisherMode;
 import io.grpc.Server;
@@ -26,15 +26,11 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-import static electionguard.protoconvert.CommonConvertKt.importElementModP;
-import static electionguard.protoconvert.CommonConvertKt.importHashedCiphertext;
-import static electionguard.protoconvert.CommonConvertKt.importSchnorrProof;
-import static electionguard.protoconvert.CommonConvertKt.publishHashedCiphertext;
-import static electionguard.protoconvert.CommonConvertKt.publishSchnorrProof;
+import static electionguard.util.ConvertCommonProto.*;
 import static electionguard.util.KUtils.productionGroup;
 
 /** A Remote Trustee with a KeyCeremonyTrustee delegate, communicating over gRpc. */
-class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.RemoteKeyCeremonyTrusteeServiceImplBase {
+class RunRemoteTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.RemoteKeyCeremonyTrusteeServiceImplBase {
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
   private static final Random random = new Random();
 
@@ -68,7 +64,7 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
   }
 
   public static void main(String[] args) {
-    String progName = RunRemoteKeyCeremonyTrustee.class.getName();
+    String progName = RunRemoteTrustee.class.getName();
     CommandLine cmdLine = null;
 
     try {
@@ -93,25 +89,24 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
     }
     String url = "localhost:"+port;
     String serverUrl = "localhost:" + cmdLine.serverPort;
-    System.out.printf("*** KeyCeremonyRemote %s with args %s %s%n", serverUrl, cmdLine.name, url);
+    System.out.printf("*** RemoteTrustee %s with args %s %s%n", serverUrl, cmdLine.name, url);
 
     // first contact the KeyCeremonyRemote "server" to get parameters
-    KeyCeremonyRemoteProxy proxy = new KeyCeremonyRemoteProxy(serverUrl);
+    RemoteKeyCeremonyProxy proxy = new RemoteKeyCeremonyProxy(serverUrl);
     RemoteKeyCeremonyProto.RegisterKeyCeremonyTrusteeResponse response = proxy.registerTrustee(cmdLine.name, url);
     proxy.shutdown();
     if (!response.getError().isEmpty()) {
       System.out.printf("    registerTrustee error %s%n", response.getError());
       throw new RuntimeException(response.getError());
     }
-    System.out.printf("    response %s %d %d %s%n", response.getGuardianId(),
+    System.out.printf("    response %s %d %d%n", response.getGuardianId(),
             response.getGuardianXCoordinate(),
-            response.getQuorum(),
-            response.getConstants()
+            response.getQuorum()
             );
 
     // Now start up our own 'RemoteTrustee' Service
     try {
-      RunRemoteKeyCeremonyTrustee keyCeremony = new RunRemoteKeyCeremonyTrustee(
+      RunRemoteTrustee keyCeremony = new RunRemoteTrustee(
               response.getGuardianId(),
               response.getGuardianXCoordinate(),
               response.getQuorum(),
@@ -122,7 +117,7 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       System.exit(0);
 
     } catch (Throwable t) {
-      System.out.printf("*** KeyCeremonyRemote FAILURE%n");
+      System.out.printf("*** RemoteTrustee FAILURE%n");
       t.printStackTrace();
       System.exit(3);
     }
@@ -160,7 +155,7 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       System.err.println("*** server shut down");
     }));
 
-    System.out.printf("---- KeyCeremonyRemoteService started, listening on %d ----%n", port);
+    System.out.printf("---- RemoteTrustee started, listening on %d ----%n", port);
   }
 
   private void stopit() throws InterruptedException {
@@ -182,10 +177,10 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
   final String trusteeDir;
   final Publisher publisher;
 
-  RunRemoteKeyCeremonyTrustee(String id,
-                              int xCoordinate,
-                              int quorum,
-                              String trusteeDir) throws IOException {
+  RunRemoteTrustee(String id,
+                   int xCoordinate,
+                   int quorum,
+                   String trusteeDir) throws IOException {
     this.delegate = new KeyCeremonyTrustee(group, id, xCoordinate, quorum);
     this.trusteeDir = trusteeDir;
 
@@ -207,21 +202,19 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       Result<PublicKeys, String> result = delegate.sendPublicKeys();
       if (result.component2() != null) {
         response.setError(result.component2());
-        logger.atInfo().log("KeyCeremonyRemoteTrustee %s sendPublicKeys error %s", delegate.id(), result.component2());
+        logger.atInfo().log("RemoteTrustee %s sendPublicKeys error %s", delegate.id(), result.component2());
       } else {
         PublicKeys keyset = result.component1();
         response.setOwnerId(keyset.getGuardianId())
                 .setGuardianXCoordinate(keyset.getGuardianXCoordinate());
-        keyset.getCoefficientProofs().forEach(p -> {
-          electionguard.protogen.SchnorrProof proto = publishSchnorrProof(p);
-          response.addCoefficientProofs(proto);
-        });
-        logger.atInfo().log("KeyCeremonyRemoteTrustee %s sendPublicKeys", delegate.id());
+        keyset.getCoefficientCommitments().forEach(c -> response.addCoefficientComittments(publishElementModP(c)));
+        keyset.getCoefficientProofs().forEach(p -> response.addCoefficientProofs(publishSchnorrProof(p)));
+        logger.atInfo().log("RemoteTrustee %s sendPublicKeys count=%d", delegate.id(), keyset.getCoefficientCommitments().size());
       }
     } catch (Throwable t) {
-      logger.atSevere().withCause(t).log("KeyCeremonyRemoteTrustee %s sendPublicKeys failed", delegate.id());
+      logger.atSevere().withCause(t).log("RemoteTrustee %s sendPublicKeys failed", delegate.id());
       t.printStackTrace();
-      response.setError("KeyCeremonyRemoteTrustee sendPublicKeys failed:" + t.getMessage());
+      response.setError("RemoteTrustee sendPublicKeys failed:" + t.getMessage());
     }
 
     responseObserver.onNext(response.build());
@@ -240,6 +233,8 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       List<SchnorrProof> proofs = proto.getCoefficientProofsList().stream()
               .map(p -> importSchnorrProof(group, p))
               .toList();
+      logger.atInfo().log("RemoteTrustee %s receivePublicKeys from %s count=%d", delegate.id(), proto.getOwnerId(), proto.getCoefficientComittmentsCount());
+
       PublicKeys keyset = new PublicKeys(
               proto.getOwnerId(),
               proto.getGuardianXCoordinate(),
@@ -249,10 +244,10 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       if (result.component2() != null) {
         response.setError(result.component2());
       }
-      logger.atInfo().log("KeyCeremonyRemoteTrustee receivePublicKeys from %s", proto.getOwnerId());
+      logger.atInfo().log("RemoteTrustee receivePublicKeys from %s", proto.getOwnerId());
 
     } catch (Throwable t) {
-      logger.atSevere().withCause(t).log("KeyCeremonyRemoteTrustee receivePublicKeys from %s failed", proto.getOwnerId());
+      logger.atSevere().withCause(t).log("RemoteTrustee receivePublicKeys from %s failed", proto.getOwnerId());
       t.printStackTrace();
       response.setError(t.getMessage());
     }
@@ -278,10 +273,10 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       } else {
         response.setError(result.component2());
       }
-      logger.atInfo().log("KeyCeremonyRemoteTrustee sendPartialKeyBackup %s", request.getGuardianId());
+      logger.atInfo().log("RemoteTrustee sendPartialKeyBackup %s", request.getGuardianId());
 
     } catch (Throwable t) {
-      logger.atSevere().withCause(t).log("KeyCeremonyRemoteTrustee sendPartialKeyBackup failed");
+      logger.atSevere().withCause(t).log("RemoteTrustee sendPartialKeyBackup failed");
       t.printStackTrace();
       response.setError(t.getMessage());
     }
@@ -314,10 +309,10 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
       } else {
         response.setError(result.component2());
       }
-      logger.atInfo().log("KeyCeremonyRemoteTrustee verifyPartialKeyBackup %s", proto.getGeneratingGuardianId());
+      logger.atInfo().log("RemoteTrustee verifyPartialKeyBackup %s", proto.getGeneratingGuardianId());
 
     } catch (Throwable t) {
-      logger.atSevere().withCause(t).log("KeyCeremonyRemoteTrustee verifyPartialKeyBackup failed");
+      logger.atSevere().withCause(t).log("RemoteTrustee verifyPartialKeyBackup failed");
       t.printStackTrace();
       response.setError(t.getMessage());
     }
@@ -332,11 +327,10 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
     CommonRpcProto.ErrorResponse.Builder response = CommonRpcProto.ErrorResponse.newBuilder();
     try {
       publisher.writeTrustee(trusteeDir, this.delegate);
-      System.out.printf("TrusteeFromKeyCeremony %s%n", this.delegate);
-      logger.atInfo().log("KeyCeremonyRemoteTrustee saveState %s", delegate.id());
+      logger.atInfo().log("RemoteTrustee saveState %s", delegate.id());
 
     } catch (Throwable t) {
-      logger.atSevere().withCause(t).log("KeyCeremonyRemoteTrustee saveState failed");
+      logger.atSevere().withCause(t).log("RemoteTrustee saveState failed");
       t.printStackTrace();
       response.setError(t.getMessage());
     }
@@ -351,10 +345,10 @@ class RunRemoteKeyCeremonyTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.Re
     CommonRpcProto.ErrorResponse.Builder response = CommonRpcProto.ErrorResponse.newBuilder();
     boolean ok = true;
     try {
-      logger.atInfo().log("KeyCeremonyRemoteTrustee finish ok = %s", request.getAllOk());
+      logger.atInfo().log("RemoteTrustee finish ok = %s", request.getAllOk());
 
     } catch (Throwable t) {
-      logger.atSevere().withCause(t).log("KeyCeremonyRemoteTrustee finish failed");
+      logger.atSevere().withCause(t).log("RemoteTrustee finish failed");
       t.printStackTrace();
       response.setError(t.getMessage());
       ok = false;

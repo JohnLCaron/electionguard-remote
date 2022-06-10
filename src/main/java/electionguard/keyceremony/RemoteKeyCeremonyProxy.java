@@ -1,8 +1,8 @@
 package electionguard.keyceremony;
 
 import com.google.common.flogger.FluentLogger;
-import electionguard.protogen.RemoteKeyCeremonyProto;
-import electionguard.protogen.RemoteKeyCeremonyServiceGrpc;
+import electionguard.protogen2.RemoteKeyCeremonyProto;
+import electionguard.protogen2.RemoteKeyCeremonyServiceGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
@@ -13,13 +13,13 @@ import java.util.concurrent.TimeUnit;
  * KeyCeremonyRemote proxy, communicating over gRpc.
  * This lives in KeyCeremonyRemoteTrustee, talking to a KeyCeremonyRemote.
  */
-class KeyCeremonyRemoteProxy {
+class RemoteKeyCeremonyProxy {
   private static final FluentLogger logger = FluentLogger.forEnclosingClass();
 
   private final ManagedChannel channel;
   private final RemoteKeyCeremonyServiceGrpc.RemoteKeyCeremonyServiceBlockingStub blockingStub;
 
-  KeyCeremonyRemoteProxy(String url) {
+  RemoteKeyCeremonyProxy(String url) {
     this.channel = ManagedChannelBuilder.forTarget(url)
             .usePlaintext()
             .enableFullStreamDecompression()
