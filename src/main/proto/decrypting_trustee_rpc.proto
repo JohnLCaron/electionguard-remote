@@ -7,22 +7,22 @@ option java_package = "electionguard.protogen2";
 option java_outer_classname = "DecryptingTrusteeProto";
 
 service DecryptingTrusteeService {
-  rpc partialDecrypt (PartialDecryptionRequest) returns (PartialDecryptionResponse) {}
+  rpc directDecrypt (DirectDecryptionRequest) returns (DirectDecryptionResponse) {}
   rpc compensatedDecrypt (CompensatedDecryptionRequest) returns (CompensatedDecryptionResponse) {}
   rpc finish (FinishRequest) returns (ErrorResponse) {}
 }
 
-message PartialDecryptionRequest {
+message DirectDecryptionRequest {
   ElementModQ extended_base_hash = 1; // The election extended_base_hash.
   repeated ElGamalCiphertext text = 2; // The text(s) to decrypt.
 }
 
-message PartialDecryptionResponse {
+message DirectDecryptionResponse {
   string error = 1; // non empty on error
-  repeated PartialDecryptionResult results = 2;;
+  repeated DirectDecryptionResult results = 2; // one for each text, in order
 }
 
-message PartialDecryptionResult {
+message DirectDecryptionResult {
   ElementModP decryption = 1;
   GenericChaumPedersenProof proof = 2;
 }
