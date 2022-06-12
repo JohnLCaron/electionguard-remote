@@ -16,23 +16,16 @@ import java.util.concurrent.TimeUnit;
 /**
  * Runs the KeyCeremony remote workflow from start to finish, using remote guardians.
  * Runs the components out of the fatJar, so be sure to build that first: "./gradlew clean assemble fatJar"
- * Also be sure to keep RunStandardWorkflow.classpath synched with fatjar SHAPSHOT version.
- * <p>
- * For command line help:
- * <strong>
- * <pre>
- *  java -classpath electionguard-java-all.jar com.sunya.electionguard.workflow.RunKeyCeremonyRemote --help
- * </pre>
- * </strong>
+ * Also be sure to keep RunRemoteWorkflowTest.classpath synched with fatjar SHAPSHOT version.
  */
 public class RunRemoteKeyCeremonyTest {
-  public static final String classpath = "build/libs/electionguard-remote-1.0-SNAPSHOT-all.jar";
+  private static final String classpath = RunRemoteWorkflowTest.classpath;
   private static final String REMOTE_TRUSTEE = "remoteTrustee";
   private static final String CMD_OUTPUT = "/home/snake/tmp/electionguard/RunRemoteKeyCeremonyTest/";
 
   private static class CommandLine {
     @Parameter(names = {"-in"}, order = 0,
-            description = "Directory containing input election manifest", required = true)
+            description = "Directory to read input election manifest", required = true)
     String inputDir;
 
     @Parameter(names = {"-nguardians"}, order = 2, description = "Number of guardians to create", required = true)
@@ -42,12 +35,16 @@ public class RunRemoteKeyCeremonyTest {
     int quorum = 5;
 
     @Parameter(names = {"-trusteeDir"}, order = 4,
-            description = "Directory containing Guardian serializations", required = true)
+            description = "Directory to write Trustee serializations", required = true)
     String trusteeDir;
 
     @Parameter(names = {"-out"}, order = 5,
-            description = "Directory containing output election record", required = true)
+            description = "Directory to write output election record", required = true)
     String encryptDir;
+
+    @Parameter(names = {"-cmdOutput"}, order = 9,
+            description = "Directory where command output is written")
+    String cmdOutput;
 
     @Parameter(names = {"-h", "--help"}, order = 99, description = "Display this help and exit", help = true)
     boolean help = false;
@@ -65,10 +62,9 @@ public class RunRemoteKeyCeremonyTest {
     }
   }
 
-  public static void main(String[] args) {
+  public static void main(String[] args) throws IOException {
     String progName = RunRemoteKeyCeremonyTest.class.getName();
     CommandLine cmdLine;
-    Stopwatch stopwatchAll = Stopwatch.createStarted();
     Stopwatch stopwatch = Stopwatch.createStarted();
 
     try {
@@ -84,12 +80,13 @@ public class RunRemoteKeyCeremonyTest {
       return;
     }
 
+    String cmdOutput = cmdLine.cmdOutput != null ? cmdLine.cmdOutput : CMD_OUTPUT;
+
     ListeningExecutorService service = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(11));
     List<RunCommand> running = new ArrayList<>();
 
-    System.out.printf("%n1=============================================================%n");
     // PerformKeyCeremony
-    RunCommand keyCeremonyRemote = new RunCommand("RunRemoteKeyCeremony", CMD_OUTPUT, service,
+    RunCommand keyCeremonyRemote = new RunCommand("RunRemoteKeyCeremony", cmdOutput, service,
             "java",
             "-classpath", classpath,
             "electionguard.keyceremony.RunRemoteKeyCeremony",
@@ -107,7 +104,7 @@ public class RunRemoteKeyCeremonyTest {
     }
 
     for (int i=1; i <= cmdLine.nguardians; i++) {
-      RunCommand command = new RunCommand("RunRemoteTrustee" + i, CMD_OUTPUT, service,
+      RunCommand command = new RunCommand("RunRemoteTrustee" + i, cmdOutput, service,
               "java",
               "-classpath", classpath,
               "electionguard.keyceremony.RunRemoteTrustee",
@@ -123,12 +120,7 @@ public class RunRemoteKeyCeremonyTest {
     } catch (Throwable e) {
       e.printStackTrace();
     }
-    System.out.printf("*** RunRemoteKeyCeremony elapsed = %d ms%n", stopwatch.elapsed(TimeUnit.MILLISECONDS));
-
-    System.out.printf("%n2=============================================================%n");
-    stopwatch.reset().start();
-
-    System.out.printf("%n*** All took = %d sec%n", stopwatchAll.elapsed(TimeUnit.SECONDS));
+    System.out.printf("*** RunRemoteKeyCeremony finished time elapsed = %d ms%n", stopwatch.elapsed(TimeUnit.MILLISECONDS));
 
     try {
       for (RunCommand command : running) {
@@ -138,8 +130,6 @@ public class RunRemoteKeyCeremonyTest {
     } catch (IOException e) {
       e.printStackTrace();
     }
-
-    System.exit(0);
   }
 
 }

@@ -356,9 +356,6 @@ class RunRemoteTrustee extends RemoteKeyCeremonyTrusteeServiceGrpc.RemoteKeyCere
 
     responseObserver.onNext(response.build());
     responseObserver.onCompleted();
-    if (server != null) {
-      System.exit(request.getAllOk() && ok ? 0 : 1);
-    }
   }
 
 }

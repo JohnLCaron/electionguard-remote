@@ -87,7 +87,7 @@ public class RunRemoteDecryptingTrustee extends DecryptingTrusteeServiceGrpc.Dec
     // Now start up our own 'DecryptingRemoteTrustee' Service
     try {
       GroupContext group = productionGroup();
-      DecryptingTrusteeIF delegate = readTrustee(group, cmdLine.trusteeFile);
+      DecryptingTrustee delegate = readTrustee(group, cmdLine.trusteeFile);
       RunRemoteDecryptingTrustee trustee = new RunRemoteDecryptingTrustee(group, delegate);
 
       if (cmdLine.serverPort != 0) {
@@ -171,7 +171,6 @@ public class RunRemoteDecryptingTrustee extends DecryptingTrusteeServiceGrpc.Dec
   RunRemoteDecryptingTrustee(GroupContext group, DecryptingTrusteeIF delegate) {
     this.group = group;
     this.delegate = delegate;
-    System.out.printf("DecryptingTrustee= %s%n", this.delegate);
   }
 
   String id() {

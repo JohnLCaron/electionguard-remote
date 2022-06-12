@@ -18,18 +18,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * Runs the decryption, using remote guardians. Encryption and Tally Accumulation has already been run.
  * Runs the components out of the fatJar, so be sure to build that first: "./gradlew clean assemble fatJar"
- * Also be sure to keep RunStandardWorkflow.classpath synched with fatjar SHAPSHOT version.
- * <p>
- * For command line help:
- * <strong>
- * <pre>
- *  java -classpath electionguard-java-all.jar com.sunya.electionguard.workflow.RunDecryptionRemote --help
- * </pre>
- * </strong>
+ * Also be sure to keep RunRemoteWorkflowTest.classpath synched with fatjar SHAPSHOT version.
  */
 public class RunRemoteDecryptionTest {
-  public static final String classpath = RunRemoteKeyCeremonyTest.classpath;
-  private static final String REMOTE_TRUSTEE = "remoteTrustee";
+  private static final String classpath = RunRemoteWorkflowTest.classpath;
   private static final String CMD_OUTPUT = "/home/snake/tmp/electionguard/RunRemoteDecryptionTest/";
 
   private static class CommandLine {
@@ -48,6 +40,10 @@ public class RunRemoteDecryptionTest {
             description = "Directory where complete election record is published", required = true)
     String outputDir;
 
+    @Parameter(names = {"-cmdOutput"}, order = 9,
+            description = "Directory where command output is written")
+    String cmdOutput;
+
     @Parameter(names = {"-h", "--help"}, order = 99, description = "Display this help and exit", help = true)
     boolean help = false;
 
@@ -64,10 +60,9 @@ public class RunRemoteDecryptionTest {
     }
   }
 
-  public static void main(String[] args) {
+  public static void main(String[] args) throws IOException {
     String progName = RunRemoteDecryptionTest.class.getName();
     CommandLine cmdLine;
-    Stopwatch stopwatchAll = Stopwatch.createStarted();
     Stopwatch stopwatch = Stopwatch.createStarted();
 
     try {
@@ -86,10 +81,10 @@ public class RunRemoteDecryptionTest {
     ListeningExecutorService service = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(11));
     List<RunCommand> running = new ArrayList<>();
 
-    System.out.printf("%n4=============================================================%n");
-    // DecryptBallots
+    String cmdOutput = cmdLine.cmdOutput != null ? cmdLine.cmdOutput : CMD_OUTPUT;
+
     int navailable = cmdLine.navailable;
-    RunCommand decryptBallots = new RunCommand("RunRemoteDecryptor", CMD_OUTPUT, service,
+    RunCommand decryptBallots = new RunCommand("RunRemoteDecryptor", cmdOutput, service,
             "java",
             "-classpath", classpath,
             "electionguard.decrypt.RunRemoteDecryptor",
@@ -108,27 +103,27 @@ public class RunRemoteDecryptionTest {
 
     int count = 0;
     for (String trusteeFilename : trusteeFiles(cmdLine.trusteeDir)) {
-      RunCommand command = new RunCommand("DecryptingRemoteTrustee" + count++, CMD_OUTPUT, service,
+      RunCommand command = new RunCommand("DecryptingRemoteTrustee" + count++, cmdOutput, service,
               "java",
               "-classpath", classpath,
               "electionguard.decrypt.RunRemoteDecryptingTrustee",
               "-trusteeFile", cmdLine.trusteeDir + "/" + trusteeFilename
               );
       running.add(command);
+      if (count >= navailable) {
+        break;
+      }
     }
 
     try {
       if (!decryptBallots.waitFor(300)) {
-        System.out.format("Kill decryptBallots = %d%n", decryptBallots.kill());
+        System.out.format("Kill RunRemoteDecryptor = %d%n", decryptBallots.kill());
       }
     } catch (Throwable e) {
       e.printStackTrace();
     }
 
-    System.out.printf("*** decryptBallots elapsed = %d sec%n", stopwatch.elapsed(TimeUnit.SECONDS));
-    stopwatch.reset().start();
-
-    System.out.printf("%n*** All took = %d sec%n", stopwatchAll.elapsed(TimeUnit.SECONDS));
+    System.out.printf("*** RemoteDecryptor finished elapsed time = %d sec%n", stopwatch.elapsed(TimeUnit.SECONDS));
 
     try {
       for (RunCommand command : running) {
@@ -138,8 +133,6 @@ public class RunRemoteDecryptionTest {
     } catch (IOException e) {
       e.printStackTrace();
     }
-
-    System.exit(0);
   }
 
   private static String[] trusteeFiles(String trusteeDir) {

@@ -28,16 +28,17 @@ import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Formatter;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static electionguard.publish.ElectionRecordFactoryKt.electionRecordFromConsumer;
 import static electionguard.util.KUtils.productionGroup;
-import static java.util.Collections.emptyMap;
 
 /**
  * A command line program to decrypt a tally and optionally a collection of ballots with remote Guardians.
@@ -118,7 +119,7 @@ public class RunRemoteDecryptor {
       }
 
       // check that outputDir exists and can be written to
-      Publisher publisher = new Publisher(cmdLine.outputDir, PublisherMode.createNew);
+      Publisher publisher = new Publisher(cmdLine.outputDir, PublisherMode.createIfMissing);
       Formatter errors = new Formatter();
       if (!publisher.validateOutputDir(errors)) {
         System.out.printf("*** Publisher validateOutputDir FAILED on %s%n%s", cmdLine.encryptDir, errors);
@@ -257,14 +258,14 @@ public class RunRemoteDecryptor {
                     .filter(guardianId -> !trusteeNames.contains(guardianId))
                     .toList();
 
-    Decryptor decryptor = new Decryptor(group, electionInitialized, trusteeProxies, missingGuardians);
+    Decryption decryptor = new Decryption(group, electionInitialized, trusteeProxies, missingGuardians);
     this.decryptedTally = decryptor.decrypt(this.encryptedTally);
 
     if (this.decryptSpoiled) {
       for (EncryptedBallot spoiled : consumer.iterateSpoiledBallots()) {
         this.spoiledDecryptedTallies.add(decryptor.decryptBallot(spoiled));
       }
-      System.out.printf("SpoiledBallotAndTally = %d%n", spoiledDecryptedTallies.size());
+      System.out.printf("spoiledDecryptedTallies count = %d%n", spoiledDecryptedTallies.size());
     }
 
     boolean ok;
@@ -275,8 +276,6 @@ public class RunRemoteDecryptor {
       e.printStackTrace();
       ok = false;
     }
-
-    System.out.printf("Done decrypting tally%n%n");
 
     System.out.printf("*** RunRemoteDecryptor %s%n", ok ? "SUCCESS" : "FAILURE");
     return ok;
@@ -305,11 +304,16 @@ public class RunRemoteDecryptor {
   }
 
   void publish(String inputDir, TallyResult tallyResult, List<DecryptingGuardian> decryptingGuardians) throws IOException {
+
     DecryptionResult results = new DecryptionResult(
             tallyResult,
             this.decryptedTally,
             decryptingGuardians,
-            emptyMap()
+            Map.of(
+                    "CreatedBy", "RunRemoteDecryptor",
+                    "CreatedOn", Instant.now().toString(),
+                    "CreatedFromDir", inputDir
+            )
     );
 
     publisher.writeDecryptionResult(results);
