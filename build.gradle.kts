@@ -60,6 +60,11 @@ dependencies {
     // On JS, it uses console.log, console.error, etc.
     implementation("io.github.microutils:kotlin-logging:2.1.21")
 
+    // Logging implementation (used by "kotlin-logging"). Note that we need
+    // a bleeding-edge implementation to ensure we don't have vulnerabilities
+    // similar to (but not as bad) as the log4j issues.
+    implementation("ch.qos.logback:logback-classic:1.3.0-alpha12")
+
     // A multiplatform Kotlin library for working with date and time.
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.3.2")
 

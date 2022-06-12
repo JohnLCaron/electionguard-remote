@@ -8,6 +8,7 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -17,17 +18,22 @@ import java.util.stream.Stream;
  */
 public class RunCommand implements Callable<Boolean> {
   final String name;
-  final String outputDir;
+  final String cmdOutput;
   final String[] args;
 
   Process process;
   boolean statusReturn;
   Throwable thrownException;
 
-  RunCommand(String name, String outputDir, ListeningExecutorService service, String... args) {
+  RunCommand(String name, String cmdOutput, ListeningExecutorService service, String... args) throws IOException {
     this.name = name;
-    this.outputDir = outputDir;
+    this.cmdOutput = cmdOutput.endsWith("/") ? cmdOutput : cmdOutput + "/";
     this.args = args;
+
+    Path cmdPath = Path.of(this.cmdOutput);
+    if (!Files.exists(cmdPath)) {
+      Files.createDirectories(cmdPath);
+    }
 
     ListenableFuture<Boolean> future = service.submit(this);
     Futures.addCallback(
@@ -55,6 +61,13 @@ public class RunCommand implements Callable<Boolean> {
     }
     return false;
   }
+
+    public int waitFor() throws InterruptedException {
+      if (process != null) {
+        return process.waitFor();
+      }
+      return process.exitValue();
+    }
 
   public int kill() {
     if (process != null) {
@@ -86,11 +99,11 @@ public class RunCommand implements Callable<Boolean> {
   }
 
   File getStdOutFile() {
-    return new File(outputDir + name + ".stdout");
+    return new File(cmdOutput + name + ".stdout");
   }
 
   File getStdErrFile() {
-    return new File(outputDir + name + ".stderr");
+    return new File(cmdOutput + name + ".stderr");
   }
 
   private boolean run(String... args) throws IOException {

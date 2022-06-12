@@ -185,7 +185,7 @@ public class RunRemoteKeyCeremony {
     this.nguardians = electionRecord.numberOfGuardians();
     this.quorum = electionRecord.quorum();
 
-    this.publisher = new Publisher(outputDir, PublisherMode.createNew);
+    this.publisher = new Publisher(outputDir, PublisherMode.createIfMissing);
     Formatter errors = new Formatter();
     if (!publisher.validateOutputDir(errors)) {
       System.out.printf("*** Publisher validateOutputDir FAILED on %s%n%s", outputDir, errors);

@@ -8,39 +8,37 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Runs the KeyCeremony remote workflow from start to finish, using remote guardians.
+ * Runs the decryption, using remote guardians. Encryption and Tally Accumulation has already been run.
  * Runs the components out of the fatJar, so be sure to build that first: "./gradlew clean assemble fatJar"
  * Also be sure to keep RunRemoteWorkflowTest.classpath synched with fatjar SHAPSHOT version.
  */
-public class RunRemoteKeyCeremonyTest {
+public class RunRemoteDecryptionTest {
   private static final String classpath = RunRemoteWorkflowTest.classpath;
-  private static final String REMOTE_TRUSTEE = "remoteTrustee";
-  private static final String CMD_OUTPUT = "/home/snake/tmp/electionguard/RunRemoteKeyCeremonyTest/";
+  private static final String CMD_OUTPUT = "/home/snake/tmp/electionguard/RunRemoteDecryptionTest/";
 
   private static class CommandLine {
-    @Parameter(names = {"-in"}, order = 0,
-            description = "Directory to read input election manifest", required = true)
-    String inputDir;
-
-    @Parameter(names = {"-nguardians"}, order = 2, description = "Number of guardians to create", required = true)
-    int nguardians = 6;
-
-    @Parameter(names = {"-quorum"}, order = 3, description = "Number of guardians that make a quorum", required = true)
-    int quorum = 5;
-
     @Parameter(names = {"-trusteeDir"}, order = 4,
-            description = "Directory to write Trustee serializations", required = true)
+            description = "Directory containing DecryptingTrustee serializations", required = true)
     String trusteeDir;
 
-    @Parameter(names = {"-out"}, order = 5,
-            description = "Directory to write output election record", required = true)
+    @Parameter(names = {"-in"}, order = 5,
+            description = "Directory containing ballot encryption and tally", required = true)
     String encryptDir;
+
+    @Parameter(names = {"-navailable"}, order = 7, description = "Number of guardians available for decryption", required = true)
+    int navailable = 0;
+
+    @Parameter(names = {"-out"}, order = 8,
+            description = "Directory where complete election record is published", required = true)
+    String outputDir;
 
     @Parameter(names = {"-cmdOutput"}, order = 9,
             description = "Directory where command output is written")
@@ -54,7 +52,7 @@ public class RunRemoteKeyCeremonyTest {
     public CommandLine(String progName, String[] args) throws ParameterException {
       this.jc = new JCommander(this);
       this.jc.parse(args);
-      jc.setProgramName(String.format("java -classpath electionguard-remote-all.jar %s", progName));
+      jc.setProgramName(String.format("java -classpath electionguard-java-all.jar %s", progName));
     }
 
     public void printUsage() {
@@ -63,7 +61,7 @@ public class RunRemoteKeyCeremonyTest {
   }
 
   public static void main(String[] args) throws IOException {
-    String progName = RunRemoteKeyCeremonyTest.class.getName();
+    String progName = RunRemoteDecryptionTest.class.getName();
     CommandLine cmdLine;
     Stopwatch stopwatch = Stopwatch.createStarted();
 
@@ -80,22 +78,22 @@ public class RunRemoteKeyCeremonyTest {
       return;
     }
 
-    String cmdOutput = cmdLine.cmdOutput != null ? cmdLine.cmdOutput : CMD_OUTPUT;
-
     ListeningExecutorService service = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(11));
     List<RunCommand> running = new ArrayList<>();
 
-    // PerformKeyCeremony
-    RunCommand keyCeremonyRemote = new RunCommand("RunRemoteKeyCeremony", cmdOutput, service,
+    String cmdOutput = cmdLine.cmdOutput != null ? cmdLine.cmdOutput : CMD_OUTPUT;
+
+    int navailable = cmdLine.navailable;
+    RunCommand decryptBallots = new RunCommand("RunRemoteDecryptor", cmdOutput, service,
             "java",
             "-classpath", classpath,
-            "electionguard.keyceremony.RunRemoteKeyCeremony",
-            "-in", cmdLine.inputDir,
-            "-out", cmdLine.encryptDir,
-            "-nguardians", Integer.toString(cmdLine.nguardians),
-            "-quorum", Integer.toString(cmdLine.quorum)
-            );
-    running.add(keyCeremonyRemote);
+            "electionguard.decrypt.RunRemoteDecryptor",
+            "-in", cmdLine.encryptDir,
+            "-out", cmdLine.outputDir,
+            "-navailable", Integer.toString(navailable)
+    );
+
+    running.add(decryptBallots);
     try {
       Thread.sleep(1000);
     } catch (Throwable e) {
@@ -103,24 +101,29 @@ public class RunRemoteKeyCeremonyTest {
       System.exit(1);
     }
 
-    for (int i=1; i <= cmdLine.nguardians; i++) {
-      RunCommand command = new RunCommand("RunRemoteTrustee" + i, cmdOutput, service,
+    int count = 0;
+    for (String trusteeFilename : trusteeFiles(cmdLine.trusteeDir)) {
+      RunCommand command = new RunCommand("DecryptingRemoteTrustee" + count++, cmdOutput, service,
               "java",
               "-classpath", classpath,
-              "electionguard.keyceremony.RunRemoteTrustee",
-              "-name", REMOTE_TRUSTEE + i,
-              "-out", cmdLine.trusteeDir);
+              "electionguard.decrypt.RunRemoteDecryptingTrustee",
+              "-trusteeFile", cmdLine.trusteeDir + "/" + trusteeFilename
+              );
       running.add(command);
+      if (count >= navailable) {
+        break;
+      }
     }
 
     try {
-      if (!keyCeremonyRemote.waitFor(30)) {
-        System.out.format("Kill RunRemoteKeyCeremony = %d%n", keyCeremonyRemote.kill());
+      if (!decryptBallots.waitFor(300)) {
+        System.out.format("Kill RunRemoteDecryptor = %d%n", decryptBallots.kill());
       }
     } catch (Throwable e) {
       e.printStackTrace();
     }
-    System.out.printf("*** RunRemoteKeyCeremony finished time elapsed = %d ms%n", stopwatch.elapsed(TimeUnit.MILLISECONDS));
+
+    System.out.printf("*** RemoteDecryptor finished elapsed time = %d sec%n", stopwatch.elapsed(TimeUnit.SECONDS));
 
     try {
       for (RunCommand command : running) {
@@ -130,6 +133,14 @@ public class RunRemoteKeyCeremonyTest {
     } catch (IOException e) {
       e.printStackTrace();
     }
+  }
+
+  private static String[] trusteeFiles(String trusteeDir) {
+    Path trusteePath = Path.of(trusteeDir);
+    if (!Files.exists(trusteePath) || !Files.isDirectory(trusteePath)) {
+      throw new RuntimeException("Trustee dir '" + trusteeDir + "' does not exist");
+    }
+    return trusteePath.toFile().list();
   }
 
 }
