@@ -14,7 +14,7 @@ plugins {
     alias(libs.plugins.protobufPlugin)
     alias(libs.plugins.execforkPlugin)
 
-    kotlin("jvm") version "1.6.21"
+    kotlin("jvm") version "1.7.10"
 }
 
 group = "electionguard.remote"
@@ -22,10 +22,14 @@ version = "1.0-SNAPSHOT"
 val pbandkVersion by extra("0.13.0")
 
 repositories {
-    mavenCentral()
-    flatDir {
-        dirs("libs")
+    maven {
+        url = uri("https://maven.pkg.github.com/danwallach/electionguard-kotlin-multiplatform")
+        credentials {
+            username = project.findProperty("github.user") as String? ?: System.getenv("USERNAME")
+            password = project.findProperty("github.key") as String? ?: System.getenv("TOKEN")
+        }
     }
+    mavenCentral()
 }
 
 dependencies {
@@ -48,7 +52,7 @@ dependencies {
     implementation(libs.flogger)
     runtimeOnly(libs.floggerBackend)
 
-    implementation(files("libs/electionguard-kotlin-multiplatform-jvm-1.0-SNAPSHOT.jar"))
+    implementation("electionguard-kotlin-multiplatform:electionguard-kotlin-multiplatform-jvm:1.0-SNAPSHOT")
     implementation(kotlin("stdlib-common", "1.6.20"))
     implementation(kotlin("stdlib", "1.6.20"))
 
@@ -60,9 +64,7 @@ dependencies {
     // On JS, it uses console.log, console.error, etc.
     implementation("io.github.microutils:kotlin-logging:2.1.21")
 
-    // Logging implementation (used by "kotlin-logging"). Note that we need
-    // a bleeding-edge implementation to ensure we don't have vulnerabilities
-    // similar to (but not as bad) as the log4j issues.
+    // Logging implementation (used by "kotlin-logging").
     implementation("ch.qos.logback:logback-classic:1.3.0-alpha12")
 
     // A multiplatform Kotlin library for working with date and time.
